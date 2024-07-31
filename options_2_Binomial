@@ -1,0 +1,47 @@
+import yfinance as yf
+
+# Fetch historical data for a stock
+ticker = 'AAPL'
+data = yf.download(ticker, start='2023-01-01', end='2024-06-17')
+print(data.head())
+
+import numpy as np
+
+def binomial_option_pricing(S, X, T, r, sigma, N, option_type='call'):
+    dt = T / N
+    u = np.exp(sigma * np.sqrt(dt))
+    d = 1 / u
+    p = (np.exp(r * dt) - d) / (u - d)
+    
+    # Initialize asset prices at maturity
+    asset_prices = np.zeros(N + 1)
+    for i in range(N + 1):
+        asset_prices[i] = S * (u ** (N - i)) * (d ** i)
+    
+    # Initialize option values at maturity
+    option_values = np.zeros(N + 1)
+    if option_type == 'call':
+        option_values = np.maximum(0, asset_prices - X)
+    elif option_type == 'put':
+        option_values = np.maximum(0, X - asset_prices)
+    
+    # Step backwards through the tree
+    for t in range(N - 1, -1, -1):
+        for i in range(t + 1):
+            option_values[i] = np.exp(-r * dt) * (p * option_values[i] + (1 - p) * option_values[i + 1])
+    
+    return option_values[0]
+# Example parameters
+S = data['Close'].iloc[-1]  # Current stock price (latest closing price)
+X = 150  # Strike price
+T = 30 / 365  # Time to expiration in years (e.g., 30 days to expiration)
+r = 0.06  # Risk-free interest rate (assume 5%)
+sigma = data['Close'].pct_change().std() * np.sqrt(252)  # Annualized volatility
+N = 50  # Number of time steps
+
+# Calculate option prices
+call_price = binomial_option_pricing(S, X, T, r, sigma, N, 'call')
+put_price = binomial_option_pricing(S, X, T, r, sigma, N, 'put')
+
+print(f"Binomial Call Option Price: {call_price}")
+print(f"Binomial Put Option Price: {put_price}")
