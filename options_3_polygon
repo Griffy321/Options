@@ -1,0 +1,106 @@
+from polygon import RESTClient
+from typing import cast
+from urllib3 import HTTPResponse
+import pandas as pd
+import json
+import numpy as np
+import mplfinance as mpf
+
+api_key = 'your_api_key'
+
+client = RESTClient(api_key)
+
+# Fetch the data
+aggs = cast(
+    HTTPResponse,
+    client.get_aggs(
+        'AAPL',  # Fixed ticker symbol to 'AAPL'
+        1,
+        'minute',
+        '2023-01-03',
+        '2023-01-03',
+        raw=True
+    ),
+)
+
+poly_data = json.loads(aggs.data)
+poly_data = poly_data['results']
+
+# Check the length of the data to ensure full period coverage
+print(f"Number of data points fetched: {len(poly_data)}")
+
+# Prepare the data for DataFrame
+dates = []
+open_prices = []
+high_prices = []
+low_prices = []
+close_prices = []
+volumes = []
+
+for bar in poly_data:
+    dates.append(pd.Timestamp(bar['t'], tz='GMT', unit='ms'))
+    open_prices.append(bar['o'])
+    high_prices.append(bar['h'])
+    low_prices.append(bar['l'])
+    close_prices.append(bar['c'])
+    volumes.append(bar['v'])
+
+data = {
+    'Open': open_prices,
+    'High': high_prices,
+    'Low': low_prices,
+    'Close': close_prices,
+    'Volume': volumes
+}
+
+dataFrame = pd.DataFrame(data, index=dates)
+
+# Binomial Pricing Model
+def binomial_tree_option_price(S, K, T, r, sigma, n, option_type='call'):
+    dt = T / n
+    u = np.exp(sigma * np.sqrt(dt))
+    d = 1 / u
+    p = (np.exp(r * dt) - d) / (u - d)
+    discount_factor = np.exp(-r * dt)
+    
+    asset_prices = np.zeros(n+1)
+    for i in range(n+1):
+        asset_prices[i] = S * (u ** (n-i)) * (d ** i)
+    
+    option_values = np.zeros(n+1)
+    if option_type == 'call':
+        option_values = np.maximum(0, asset_prices - K)
+    elif option_type == 'put':
+        option_values = np.maximum(0, K - asset_prices)
+    
+    for j in range(n-1, -1, -1):
+        for i in range(j+1):
+            option_values[i] = (p * option_values[i] + (1-p) * option_values[i+1]) * discount_factor
+    
+    return option_values[0]
+
+# Apply model to each minute
+option_prices = []
+
+for i in range(len(dataFrame)):
+    S = dataFrame['Close'].iloc[i]
+    K = 130  # Example strike price
+    T = 1/12  # One month till expiration (in years)
+    r = 0.06  # Example risk-free rate
+    sigma = 0.5  # Increased volatility to make the option more valuable
+    n = 100  # Number of steps in binomial tree
+    
+    call_price = binomial_tree_option_price(S, K, T, r, sigma, n)
+    option_prices.append(call_price)
+
+dataFrame['Call Option Price'] = option_prices
+
+# Set float format to display numbers in fixed-point notation
+pd.options.display.float_format = '{:.10f}'.format
+
+print(dataFrame[['Close', 'Call Option Price']])
+
+# Plotting the candlestick chart
+mpf.plot(dataFrame, type='line', style='charles', title='AAPL Minute Data',
+         ylabel='Call Option Price', volume=True, savefig='line_chart.png')
+
